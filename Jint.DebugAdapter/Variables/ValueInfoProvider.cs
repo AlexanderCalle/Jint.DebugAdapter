@@ -7,7 +7,6 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Jint.DebugAdapter.Helpers;
 using Jint.Native;
-using Jint.Native.Argument;
 using Jint.Native.Array;
 using Jint.Native.Date;
 using Jint.Native.Function;

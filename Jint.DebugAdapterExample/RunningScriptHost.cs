@@ -16,8 +16,7 @@ namespace Jint.DebugAdapterExample
             Engine = new Engine(options =>
             {
                 options.DebugMode(true)
-                    .SetupDebugger()
-                    .EnableModules(@"D:\Web\test");
+                    .SetupDebugger();
             });
         }
 

@@ -16,7 +16,7 @@ public class FilesScriptHost : IScriptHost
         {
             options.DebugMode(true)
                 .SetupDebugger()
-                .EnableModules(@"D:\Web\test");
+                .EnableModules(@"C:\");
         });
     }
 
@@ -27,6 +27,6 @@ public class FilesScriptHost : IScriptHost
 
     public void Launch(string program, IReadOnlyDictionary<string, JsonElement> arguments)
     {
-        Engine.Modules.Import(program);
+       Engine.Modules.Import(program);
     }
 }

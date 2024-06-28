@@ -191,17 +191,14 @@ internal class SynchronizingDebugger
                 action();
                 OnDone();
             }
+            catch(OperationCanceledException)
+            {
+                OnCancelled();
+            }
             catch (Exception ex)
             {
-                if (ex is OperationCanceledException)
-                {
-                    OnCancelled();
-                }
-                else
-                {
                     OnError(ex);
                     launchCompleted.SetException(ex);
-                }
             }
             finally
             {
@@ -389,95 +386,118 @@ internal class SynchronizingDebugger
 
     private StepMode DebugHandler_Step(object sender, DebugInformation e)
     {
-        cts.Token.ThrowIfCancellationRequested();
-
-        if (!IsAttached)
+        try
         {
-            return StepMode.None;
-        }
+            cts.Token.ThrowIfCancellationRequested();
 
-        // The Step handler may encounter breakpoints. Normal breakpoints don't need any handling while stepping
-        // (that's the reason Break isn't called in the first place). However, we're dealing with hit count
-        // conditions, which still need to increment the number of times the breakpoint has been passed. And
-        // logpoints, which still need to log, even when stepping through the logpoint.
-        HandleBreakPoint(e);
-
-        switch (state)
-        {
-            case DebuggerState.WaitingForClient:
-            case DebuggerState.WaitingForUI:
-                throw new InvalidOperationException("Debugger should not be stepping while waiting for client or UI");
-
-            case DebuggerState.Entering:
-                if (!pauseOnEntry)
-                {
-                    state = DebuggerState.Running;
-                    return StepMode.None;
-                }
-                state = DebuggerState.Stepping;
-                return OnPause(PauseReason.Entry, e);
-
-            case DebuggerState.Running:
+            if (!IsAttached)
+            {
                 return StepMode.None;
+            }
 
-            case DebuggerState.Pausing:
-                state = DebuggerState.Stepping;
-                return OnPause(PauseReason.Pause, e);
+            // The Step handler may encounter breakpoints. Normal breakpoints don't need any handling while stepping
+            // (that's the reason Break isn't called in the first place). However, we're dealing with hit count
+            // conditions, which still need to increment the number of times the breakpoint has been passed. And
+            // logpoints, which still need to log, even when stepping through the logpoint.
+            HandleBreakPoint(e);
 
-            case DebuggerState.Stepping:
-                return OnPause(PauseReason.Step, e);
+            switch (state)
+            {
+                case DebuggerState.WaitingForClient:
+                case DebuggerState.WaitingForUI:
+                    throw new InvalidOperationException("Debugger should not be stepping while waiting for client or UI");
 
-            case DebuggerState.Terminating:
-                throw new InvalidOperationException("Debugger should not be stepping while terminating");
+                case DebuggerState.Entering:
+                    if (!pauseOnEntry)
+                    {
+                        state = DebuggerState.Running;
+                        return StepMode.None;
+                    }
+                    state = DebuggerState.Stepping;
+                    return OnPause(PauseReason.Entry, e);
 
-            default:
-                throw new NotImplementedException($"Debugger state handling for {state} not implemented.");
+                case DebuggerState.Running:
+                    return StepMode.None;
+
+                case DebuggerState.Pausing:
+                    state = DebuggerState.Stepping;
+                    return OnPause(PauseReason.Pause, e);
+
+                case DebuggerState.Stepping:
+                    return OnPause(PauseReason.Step, e);
+
+                case DebuggerState.Terminating:
+                    throw new InvalidOperationException("Debugger should not be stepping while terminating");
+
+                default:
+                    throw new NotImplementedException($"Debugger state handling for {state} not implemented.");
+            }
+        } catch(OperationCanceledException)
+        {
+            OnCancelled();
+            return StepMode.None ;
         }
 
     }
 
     private StepMode DebugHandler_Break(object sender, DebugInformation e)
     {
-        cts.Token.ThrowIfCancellationRequested();
-
-        if (!IsAttached)
+        try
         {
+            cts.Token.ThrowIfCancellationRequested();
+
+            if (!IsAttached)
+            {
+                return StepMode.None;
+            }
+
+            bool breakPointShouldBreak = HandleBreakPoint(e);
+
+            switch (e.PauseType)
+            {
+                case PauseType.DebuggerStatement:
+                    state = DebuggerState.Stepping;
+                    return OnPause(PauseReason.DebuggerStatement, e);
+
+                case PauseType.Break:
+                    if (breakPointShouldBreak)
+                    {
+                        state = DebuggerState.Stepping;
+                        return OnPause(PauseReason.BreakPoint, e);
+                    }
+                    break;
+            }
+
+            // Break is only called when we're not stepping - so since we didn't pause, keep running:
             return StepMode.None;
         }
-
-        bool breakPointShouldBreak = HandleBreakPoint(e);
-
-        switch (e.PauseType)
+        catch (OperationCanceledException)
         {
-            case PauseType.DebuggerStatement:
-                state = DebuggerState.Stepping;
-                return OnPause(PauseReason.DebuggerStatement, e);
-
-            case PauseType.Break:
-                if (breakPointShouldBreak)
-                {
-                    state = DebuggerState.Stepping;
-                    return OnPause(PauseReason.BreakPoint, e);
-                }
-                break;
+            OnCancelled();
+            return StepMode.None;
         }
-
-        // Break is only called when we're not stepping - so since we didn't pause, keep running:
-        return StepMode.None;
     }
 
 
     private StepMode DebugHandler_Skip(object sender, DebugInformation e)
     {
-        cts.Token.ThrowIfCancellationRequested();
-
-        if (!IsAttached)
+        try
         {
+            cts.Token.ThrowIfCancellationRequested();
+
+            if (!IsAttached)
+            {
+                return StepMode.None;
+            }
+
+            // Skip allows us to change the stepmode (i.e. pause) when we're in StepMode.None (i.e. running)
+            return nextStep;
+        }
+        catch (OperationCanceledException)
+        {
+            OnCancelled();
             return StepMode.None;
         }
-
-        // Skip allows us to change the stepmode (i.e. pause) when we're in StepMode.None (i.e. running)
-        return nextStep;
     }
 
     private bool HandleBreakPoint(DebugInformation info)
@@ -539,11 +559,18 @@ internal class SynchronizingDebugger
         while (true)
         {
             // We want to block here - that's how we pause script execution: by blocking the engine thread.
-            channel.Reader.WaitToReadAsync(cts.Token).AsTask().Wait();
-
-            if (ProcessMessages() == ProcessMessagesResult.ExecutionShouldContinue)
+            try
             {
-                // A message included a request to resume execution (e.g. continue/step)
+                channel.Reader.WaitToReadAsync(cts.Token).AsTask().Wait();
+
+                if (ProcessMessages() == ProcessMessagesResult.ExecutionShouldContinue)
+                {
+                    // A message included a request to resume execution (e.g. continue/step)
+                    break;
+                }
+            }
+            catch (AggregateException ex)
+            {
                 break;
             }
         }
